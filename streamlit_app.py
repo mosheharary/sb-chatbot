@@ -1,12 +1,40 @@
 import streamlit as st
 import os
 from openai import OpenAI
+import PyPDF2
+
 
 PDF_FILEPATHS = r"/tmp/docs"
 TKT_FILEPATHS = r"/tmp/txt"
 CHUNKS_SAVE_PATH = r"/tmp/chunks"
 CHUNKS_EMBEDDINGS_SAVE_PATH=r"/tmp/chunks_embeddings"
 DOCUMENT_TYPE = "skybox"
+
+def convert_to_txt(filename):
+    pdf_path = os.path.join(PDF_FILEPATHS, filename)
+    txt_path = os.path.join(TKT_FILEPATHS, filename[:-4] + '.txt')
+    try:
+                # Open the PDF file
+        with open(pdf_path, 'rb') as pdf_file:
+                    # Create a PDF reader object
+            pdf_reader = PyPDF2.PdfReader(pdf_file)
+                    
+                    # Extract text from each page
+            text = ''
+            for page in pdf_reader.pages:
+                text += page.extract_text()
+
+                # Write the extracted text to a new text file
+        with open(txt_path, 'w', encoding='utf-8') as txt_file:
+            txt_file.write(text)
+
+        print(f"Successfully converted {filename} to text.")
+
+    except Exception as e:
+        print(f"Error converting {filename}: {str(e)}")
+
+
+
 
 def save_uploadedfile(uploadedfile):
      with open(os.path.join(PDF_FILEPATHS,uploadedfile.name),"wb") as f:

@@ -1,5 +1,10 @@
 import streamlit as st
 from openai import OpenAI
+import os
+
+# Directory to save uploaded files
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Show title and description.
 st.title("💬 Chatbot")
@@ -16,6 +21,13 @@ openai_api_key = st.text_input("OpenAI API Key", type="password")
 if not openai_api_key:
     st.info("Please add your OpenAI API key to continue.", icon="🗝️")
 else:
+    uploaded_file = st.file_uploader("Upload a pdf file")
+    if uploaded_file is not None:
+        # Save uploaded file to directory
+        file_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
+        with open(file_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.success(f"File '{uploaded_file.name}' saved successfully!")
 
     # Create an OpenAI client.
     client = OpenAI(api_key=openai_api_key)

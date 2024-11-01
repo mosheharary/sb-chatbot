@@ -1,25 +1,64 @@
 import streamlit as st
+import fitz
 import os
+from openai import OpenAI
 
-def get_pdf_text(files):
-    return "Processed text from PDF"
+## PDF Upload and Processing
 
-def main():
-    files_directory = 'predefined_files'
-    
-    if 'initialized' not in st.session_state or not st.session_state.initialized:
-        file_paths = [os.path.join(files_directory, f) for f in os.listdir(files_directory) if f.endswith('.pdf')]
-        pdffiles = []  # This would be a list of file paths or file objects
-        
-        for file_path in file_paths:
-            pdffiles.append(file_path)  # Adjust this part to open the file if needed for processing
-        
-        raw_text = get_pdf_text(pdffiles)
-        st.session_state.initialized = True  # Mark initialization as done to avoid re-running
-        
-        st.write(raw_text)
-    else:
-        st.write("Initialization already done.")
+st.title("PDF Processor and ChatBot")
 
-if __name__ == "__main__":
-    main()
+# File uploader for multiple PDFs
+uploaded_files = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
+
+# Skip option
+skip_upload = st.checkbox("Skip file upload")
+
+if not skip_upload and uploaded_files:
+    for uploaded_file in uploaded_files:
+        # Read PDF and convert to text
+        with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
+            text = ""
+            for page in doc:
+                text += page.get_text()
+        
+        # Save text to file
+        txt_filename = os.path.splitext(uploaded_file.name)[0] + ".txt"
+        with open(txt_filename, "w", encoding="utf-8") as txt_file:
+            txt_file.write(text)
+        
+        st.success(f"Converted {uploaded_file.name} to {txt_filename}")
+
+## ChatBot Interface
+
+st.header("ChatBot")
+
+# Initialize OpenAI client
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Display chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# Chat input
+if prompt := st.chat_input("What would you like to know?"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        full_response = ""
+        for response in client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages],
+            stream=True,
+        ):
+            full_response += (response.choices[0].delta.content or "")
+            message_placeholder.markdown(full_response + "▌")
+        message_placeholder.markdown(full_response)
+    st.session_state.messages.append({"role": "assistant", "content": full_response})

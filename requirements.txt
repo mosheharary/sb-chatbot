@@ -3,4 +3,3 @@ openai
 PyPDF2
 tiktoken
 jinja2
-json

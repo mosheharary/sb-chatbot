@@ -2,6 +2,8 @@ import streamlit as st
 import os
 from openai import OpenAI
 import PyPDF2
+import tiktoken
+
 
 
 PDF_FILEPATHS = r"/tmp/docs"
@@ -9,6 +11,55 @@ TKT_FILEPATHS = r"/tmp/txt"
 CHUNKS_SAVE_PATH = r"/tmp/chunks"
 CHUNKS_EMBEDDINGS_SAVE_PATH=r"/tmp/chunks_embeddings"
 DOCUMENT_TYPE = "skybox"
+
+def get_add_context_prompt(chunk_text, document_text):
+    template = env.get_template('create_context_prompt.j2')
+    data = {
+        'WHOLE_DOCUMENT': document_text,  # Leave blank for default or provide a name
+        'CHUNK_CONTENT': chunk_text  # You can set any score here
+    }
+    output = template.render(data)
+    return output
+
+
+def split_text_into_chunks_with_overlap(text):
+    tokenizer = tiktoken.get_encoding("cl100k_base")
+    tokens = tokenizer.encode(text)  # Tokenize the input text
+    chunks = []
+    # Loop through the tokens, creating chunks with overlap
+    for i in range(0, len(tokens), CHUNK_SIZE - CHUNK_OVERLAP):
+        chunk_tokens = tokens[i:i + CHUNK_SIZE]  # Include overlap by adjusting start point
+        chunk_text = tokenizer.decode(chunk_tokens)
+        chunks.append(chunk_text)
+    return chunks
+
+
+def dump_docs_to_chuncs(document_dir,chunk_dir, openai_client):
+    tot_price=0
+    document_filenames = os.listdir(document_dir)
+    for filename in tqdm(document_filenames):
+        with open(f"{document_dir}/{filename}", "r", encoding="utf-8") as f:
+            document_text = f.read()
+        chunks = split_text_into_chunks_with_overlap(document_text)
+        for idx, chunk in enumerate(chunks):
+            fname = filename.split(".")[0]
+            chunk_save_filename = f"{fname}_{idx}.json"
+            chunk_save_path = f"{chunk_dir}/{chunk_save_filename}"
+            if os.path.exists(chunk_save_path):
+                continue
+            prompt = get_add_context_prompt(chunk, document_text)
+            context, price = prompt_gpt(prompt, openai_client)
+            tot_price += price
+            chunk_info = {
+                "id" : f"{filename}_{int(idx)}",
+                "chunk_text" : context + "\n\n" + chunk,
+                "chunk_idx" : idx,
+                "filename" : filename,
+                "document_type": DOCUMENT_TYPE
+            }
+            with open(chunk_save_path, "w", encoding="utf-8") as f:
+                json.dump(chunk_info, f, indent=4)
+
 
 def convert_to_txt(filename):
     pdf_path = os.path.join(PDF_FILEPATHS, filename)

@@ -3,10 +3,10 @@ import fitz
 import os
 from openai import OpenAI
 
-PDF_FILEPATHS = r"./docs"
-TKT_FILEPATHS = r"./txt"
-CHUNKS_SAVE_PATH = r"./chunks"
-CHUNKS_EMBEDDINGS_SAVE_PATH=r"./chunks_embeddings"
+PDF_FILEPATHS = r"/tmp/docs"
+TKT_FILEPATHS = r"/tmp/txt"
+CHUNKS_SAVE_PATH = r"/tmp/chunks"
+CHUNKS_EMBEDDINGS_SAVE_PATH=r"/tmp/chunks_embeddings"
 DOCUMENT_TYPE = "skybox"
 
 def save_uploadedfile(uploadedfile):

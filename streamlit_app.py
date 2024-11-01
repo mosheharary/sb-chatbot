@@ -39,6 +39,7 @@ def convert_to_txt(filename):
 def save_uploadedfile(uploadedfile):
      with open(os.path.join(PDF_FILEPATHS,uploadedfile.name),"wb") as f:
          f.write(uploadedfile.getbuffer())
+         convert_to_txt(uploadedfile.name)
      return st.success("Saved File:{} to {}".format(uploadedfile.name,PDF_FILEPATHS))
 
 

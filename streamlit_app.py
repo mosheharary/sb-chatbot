@@ -3,7 +3,15 @@ import os
 from openai import OpenAI
 import PyPDF2
 import tiktoken
+from jinja2 import Environment, FileSystemLoader
+import json
 
+
+
+CHUNK_SIZE = 7000
+CHUNK_OVERLAP = 500
+TEXT_EMBEDDING_MODEL = "text-embedding-3-large"
+GPT_MODEL = "gpt-4o-mini"
 
 
 PDF_FILEPATHS = r"/tmp/docs"
@@ -12,7 +20,20 @@ CHUNKS_SAVE_PATH = r"/tmp/chunks"
 CHUNKS_EMBEDDINGS_SAVE_PATH=r"/tmp/chunks_embeddings"
 DOCUMENT_TYPE = "skybox"
 
+def prompt_gpt(prompt, openai_client):
+    messages = [{"role": "user", "content": prompt}]
+    response = openai_client.chat.completions.create(
+        model=GPT_MODEL,  # Ensure correct model name is used
+        messages=messages,
+        temperature=0,
+    )
+    content = response.choices[0].message.content
+    return content
+
+
 def get_add_context_prompt(chunk_text, document_text):
+    file_loader = FileSystemLoader('./templates')
+    env = Environment(loader=file_loader)
     template = env.get_template('create_context_prompt.j2')
     data = {
         'WHOLE_DOCUMENT': document_text,  # Leave blank for default or provide a name
@@ -37,7 +58,7 @@ def split_text_into_chunks_with_overlap(text):
 def dump_docs_to_chuncs(document_dir,chunk_dir, openai_client):
     tot_price=0
     document_filenames = os.listdir(document_dir)
-    for filename in tqdm(document_filenames):
+    for filename in document_filenames:
         with open(f"{document_dir}/{filename}", "r", encoding="utf-8") as f:
             document_text = f.read()
         chunks = split_text_into_chunks_with_overlap(document_text)
@@ -48,8 +69,7 @@ def dump_docs_to_chuncs(document_dir,chunk_dir, openai_client):
             if os.path.exists(chunk_save_path):
                 continue
             prompt = get_add_context_prompt(chunk, document_text)
-            context, price = prompt_gpt(prompt, openai_client)
-            tot_price += price
+            context = prompt_gpt(prompt, openai_client)
             chunk_info = {
                 "id" : f"{filename}_{int(idx)}",
                 "chunk_text" : context + "\n\n" + chunk,
@@ -112,6 +132,8 @@ if not skip_upload and uploaded_files:
 
     for uploaded_file in uploaded_files:
         save_uploadedfile(uploaded_file)
+    openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    dump_docs_to_chuncs(PDF_FILEPATHS,CHUNKS_SAVE_PATH,openai_client)
         
 
 ## ChatBot Interface

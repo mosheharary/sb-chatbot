@@ -3,6 +3,18 @@ import fitz
 import os
 from openai import OpenAI
 
+PDF_FILEPATHS = r"./docs"
+TKT_FILEPATHS = r"./txt"
+CHUNKS_SAVE_PATH = r"./chunks"
+CHUNKS_EMBEDDINGS_SAVE_PATH=r"./chunks_embeddings"
+DOCUMENT_TYPE = "skybox"
+
+def save_uploadedfile(uploadedfile):
+     with open(os.path.join(PDF_FILEPATHS,uploadedfile.name),"wb") as f:
+         f.write(uploadedfile.getbuffer())
+     return st.success("Saved File:{} to {}".format(uploadedfile.name),PDF_FILEPATHS)
+
+
 ## PDF Upload and Processing
 
 st.title("PDF Processor and ChatBot")
@@ -14,19 +26,14 @@ uploaded_files = st.file_uploader("Upload PDF files", type="pdf", accept_multipl
 skip_upload = st.checkbox("Skip file upload")
 
 if not skip_upload and uploaded_files:
+    os.makedirs(PDF_FILEPATHS, exist_ok=True)
+    os.makedirs(CHUNKS_SAVE_PATH, exist_ok=True)
+    os.makedirs(TKT_FILEPATHS, exist_ok=True)
+    os.makedirs(CHUNKS_EMBEDDINGS_SAVE_PATH, exist_ok=True)
+
     for uploaded_file in uploaded_files:
-        # Read PDF and convert to text
-        with fitz.open(stream=uploaded_file.read(), filetype="pdf") as doc:
-            text = ""
-            for page in doc:
-                text += page.get_text()
+        save_uploadedfile(uploaded_file)
         
-        # Save text to file
-        txt_filename = os.path.splitext(uploaded_file.name)[0] + ".txt"
-        with open(txt_filename, "w", encoding="utf-8") as txt_file:
-            txt_file.write(text)
-        
-        st.success(f"Converted {uploaded_file.name} to {txt_filename}")
 
 ## ChatBot Interface
 

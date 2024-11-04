@@ -9,9 +9,15 @@ import json
 from openai import OpenAI
 from  pinecone import Pinecone
 import os
+from SkyboxPdfHandler import SkyboxPdfHandler
+#from main import add_usage_entry
 from main import check_authentication
 check_authentication()
 
+chunk_size = st.session_state.params["chunk_size"]
+chunk_overlap = st.session_state.params["chunk_overlap"]
+selected_embedding_models = st.session_state.params["selected_embedding_models"]
+selected_llm_models = st.session_state.params["selected_llm_models"]
 
 st.set_page_config(page_title="File Upload, Chunking, Embedding, and Pinecone Upload", page_icon="📁")
 
@@ -46,18 +52,17 @@ def upload_to_gcs(file, bucket_name, destination_blob_name):
     blob.upload_from_file(file)
 
 def convert_and_upload_pdf(pdf_file, bucket_name, pdf_blob_name, txt_blob_name):
-    upload_to_gcs(pdf_file, bucket_name, pdf_blob_name)
+    #upload_to_gcs(pdf_file, bucket_name, pdf_blob_name)
     pdf_file.seek(0)
     text = pdf_to_text(pdf_file)
     text_file = io.BytesIO(text.encode('utf-8'))
-    upload_to_gcs(text_file, bucket_name, txt_blob_name)
+    #upload_to_gcs(text_file, bucket_name, txt_blob_name)
     return text
 
 def split_text(text):
     encoding = tiktoken.get_encoding("cl100k_base")
     tokens = encoding.encode(text)
-    chunk_size = 7000
-    overlap = 500
+    overlap = chunk_overlap
     chunks = []
     for i in range(0, len(tokens), chunk_size - overlap):
         chunk = tokens[i:i + chunk_size]
@@ -65,7 +70,9 @@ def split_text(text):
     return chunks
 
 def get_embedding(text):
-    return openai_client.embeddings.create(input = [text], model="text-embedding-3-large").data[0].embedding
+    response = openai_client.embeddings.create(input = [text], model=selected_embedding_models)
+    #add_usage_entry(response.usage.total_tokens, f"chunk-embedding-{selected_embedding_models}") 
+    return response.data[0].embedding
 
 def get_add_context_prompt(chunk_text, document_text):
     file_loader = FileSystemLoader('./templates')
@@ -82,10 +89,11 @@ def get_add_context_prompt(chunk_text, document_text):
 def prompt_gpt(prompt):
     messages = [{"role": "user", "content": prompt}]
     response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",  # Ensure correct model name is used
+        model=selected_llm_models,  # Ensure correct model name is used
         messages=messages,
         temperature=0,
     )
+    #add_usage_entry(response.usage.total_tokens, f"frompt-{selected_llm_models}") 
     content = response.choices[0].message.content
     return content
 
@@ -133,32 +141,51 @@ def process_embed_and_upload_chunks(text, filename, bucket_name, base_blob_name)
         upload_to_pinecone(json_object)
     return len(chunks)
 
-# File uploader
-uploaded_file = st.file_uploader("Choose a file to upload", type=["pdf", "txt"])
+if st.button("Delete all uploaded data !!!"):
+    bucket_name = "sb-docs"
+    try:
+        blobs = client.list_blobs(bucket_name)
+        for blob in blobs:
+            blob.delete()
+        index.delete(delete_all=True, namespace="default")
+        st.success("All uploaded data deleted.")
+    except Exception as e:
+        if "Namespace not found" in str(e):
+            st.success("All uploaded data deleted.")
+        else:
+            st.error(f"{e.body}")
+else:
+    # File uploader
+    uploaded_file = st.file_uploader("Upload Skybox PDF file", type=["pdf"])
 
-if uploaded_file is not None:
-    st.write("File details:")
-    st.write(f"Filename: {uploaded_file.name}")
-    st.write(f"File size: {uploaded_file.size} bytes")
+    if uploaded_file is not None:
+        st.write("File details:")
+        st.write(f"Filename: {uploaded_file.name}")
+        st.write(f"File size: {uploaded_file.size} bytes")
 
-    # Upload button
-    if st.button("Upload, Process, Embed, and Upload to Pinecone"):
-        bucket_name = "sb-docs"
-        
-        try:
-            if uploaded_file.type == "application/pdf":
-                pdf_blob_name = f"pdfs/{uploaded_file.name}"
-                txt_blob_name = f"texts/{uploaded_file.name.rsplit('.', 1)[0]}.txt"
-                text = convert_and_upload_pdf(uploaded_file, bucket_name, pdf_blob_name, txt_blob_name)
-                embeddings_base_name = f"embeddings/{uploaded_file.name.rsplit('.', 1)[0]}"
-                num_chunks = process_embed_and_upload_chunks(text, uploaded_file.name, bucket_name, embeddings_base_name)
+        # Upload button
+        if st.button("Upload, Process, Embed, and Upload to Pinecone"):
+            bucket_name = "sb-docs"
             
-                st.success(f"File processed and split into {num_chunks} chunks. Embeddings stored in GCS and uploaded to Pinecone with metadata.")
-            else:
-                st.error("Please upload a PDF file.")
-            # Process, embed chunks, and upload to Pinecone
-        
-        except Exception as e:
-            st.error(f"An error occurred: {str(e)}")
+            try:
+                if uploaded_file.type == "application/pdf":
+                    sb_file=SkyboxPdfHandler(uploaded_file)
+                    sb_file.pdf_to_text()
+                    sb_file.process_pdf()
+                    sb_file.save()
 
-st.sidebar.success("You are currently on the File Upload, Chunking, Embedding, and Pinecone Upload page.")
+                    #pdf_blob_name = f"pdfs/{uploaded_file.name}"
+                    #txt_blob_name = f"texts/{uploaded_file.name.rsplit('.', 1)[0]}.txt"
+                    #text = convert_and_upload_pdf(uploaded_file, bucket_name, pdf_blob_name, txt_blob_name)
+                    #embeddings_base_name = f"embeddings/{uploaded_file.name.rsplit('.', 1)[0]}"
+                    #num_chunks = process_embed_and_upload_chunks(text, uploaded_file.name, bucket_name, embeddings_base_name)
+                
+                    st.success(f"File processed and split into {len(sb_file.chunks)} chunks. Embeddings stored in GCS and uploaded to Pinecone with metadata.")
+                else:
+                    st.error("Please upload a PDF file.")
+                # Process, embed chunks, and upload to Pinecone
+            
+            except Exception as e:
+                st.error(f"An error occurred: {str(e)}")
+
+    st.sidebar.success("You are currently on the File Upload, Chunking, Embedding, and Pinecone Upload page.")

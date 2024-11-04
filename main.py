@@ -1,9 +1,23 @@
 import streamlit as st
 import nltk
 import os
+import json
+from datetime import datetime, time, timedelta
+from SqliteClient import SqliteClient
+
+sqlite_host=st.secrets["sqlite_host"]
+sqlite_port=st.secrets["sqlite_port"]
+sqlite_key=st.secrets["sqlite_key"]
+sqlitecloud_connection_string=f"sqlitecloud://{sqlite_host}:{sqlite_port}/sb-docs?apikey={sqlite_key}"
+
 
 nltk.download('punkt', quiet=True)
 nltk.download('punkt_tab', quiet=True)
+
+def init_slqitecloud():
+    sqlient = SqliteClient ("sb-docs")
+    sqlient.create_table("api_usage_data","request_timestamp TEXT,request_tokens INTEGER,request_type TEXT")
+    sqlient.create_table("rag_evaluation","question TEXT,answer TEXT,rate INTEGER")
 
 # Define the authentication function
 def authenticate(username, password):
@@ -11,7 +25,7 @@ def authenticate(username, password):
             password == st.secrets["auth_password"])
 
 # Main application
-def main():
+def main():    
     st.set_page_config(page_title="Skybox Assistant", page_icon="🏠")
 
     # Initialize session state for authentication
@@ -28,6 +42,7 @@ def main():
                 if authenticate(username, password):
                     st.session_state.authenticated = True
                     st.success("Logged in successfully!")
+                    init_slqitecloud()
                 else:
                     st.error("Invalid username or password")
         else:
@@ -43,6 +58,51 @@ def main():
         # Display available pages
         st.sidebar.page_link("pages/1_upload_pdf.py", label="Skybox PDF Upload")
         st.sidebar.page_link("pages/2_Skybox_Assistant.py", label="Skybox Assistant")
+        st.sidebar.page_link("pages/3_OpenAI_Analytics.py", label="OpenAI Analytics")
+
+        st.session_state.params['chunk_size'] = st.number_input(
+            "Chunk Size (1000 to 7000):",
+            min_value=1000,
+            max_value=7000,
+            value=1000,  # Default value
+            step=100,
+            help="Enter a chunk size between 500 and 7000. This parameter will take effect when you upload a PDF file."
+        )
+
+    # Input for chunk overlap
+        st.session_state.params['chunk_overlap'] = st.number_input(
+            "Chunk Overlap (100 to 500):",
+            min_value=100,
+            max_value=500,
+            value=200,  # Default value
+            step=50,
+            help="Enter a chunk overlap between 100 and 1000. This parameter will take effect when you upload a PDF file."
+        )
+
+        embedding_models = [
+            "text-embedding-3-large",
+            "text-embedding-3-small"
+        ]
+    
+        st.session_state.params['selected_embedding_models'] = st.selectbox(
+            "Select Embedding Model:",
+            options=embedding_models,
+            index=0,  # Default selection
+            help="Choose an embedding model from the list. This parameter will take effect when you upload a PDF file."
+        )
+
+        llm_models = [
+            "gpt-4o-mini",
+            "gpt-4o",
+            "o1-preview"
+        ]
+    
+        st.session_state.params['selected_llm_models'] = st.selectbox(
+            "Select OpenAI  Model:",
+            options=llm_models,
+            index=0,  # Default selection
+            help="Choose an OpenAI LLM model from the list. This parameter will take effect when you ask a question."
+        )
 
         st.sidebar.success("Select a page above.")
     else:
@@ -54,6 +114,16 @@ def check_authentication():
     if not st.session_state.get('authenticated', False):
         st.error("Please log in to access this page.")
         st.stop()
+
+
+if 'params' not in st.session_state:
+    st.session_state.params = {
+        'selected_embedding_models': '',
+        'selected_llm_models': '',
+        'chunk_size': (1000, 7000),
+        'chunk_overlap': (100, 500)
+    }
+
 
 if __name__ == "__main__":
     main()

@@ -1,63 +1,53 @@
 import streamlit as st
-from openai import OpenAI
-from pinecone import Pinecone
-import tiktoken
-import os
-from google.oauth2 import service_account
-from google.cloud import storage
-import nltk
 from nltk.tokenize import word_tokenize
 from rank_bm25 import BM25Okapi
+from LangChainChatClient import LangChainChatClient
 from main import check_authentication
-check_authentication()
+from SkyboxPdfHandler import SkyboxPdfHandler
+from langchain.prompts import ChatPromptTemplate
+from langchain_community.chat_message_histories import StreamlitChatMessageHistory
+from langchain.schema import SystemMessage, HumanMessage, AIMessage
 
 
+selected_embedding_models = st.session_state.params["selected_embedding_models"]
+selected_llm_models = st.session_state.params["selected_llm_models"]
+messages = StreamlitChatMessageHistory(key="chat_messages")
 
 st.set_page_config(page_title="Skybox Assistant", page_icon="🤖")
+st.sidebar.header("Parameters")
+prompt_default = st.sidebar.text_area(
+    "Default Prompt", 
+    value="""
+    Act as a conversational assistant.
+    Answer the question based only on the following context:
+    """,height=150)
+temperature = st.sidebar.slider("Temperature", min_value=0.0, max_value=1.0, value=0.5, step=0.1)
+
+llm = LangChainChatClient(temperature=temperature)
 
 
-# Initialize Pinecone
-key="PINECONE_API_KEY"
-PINECONE_API_KEY=os.getenv(key)
-pinecone = Pinecone(api_key=PINECONE_API_KEY)
-index_name = "skybox-docs"
-index = pinecone.Index(index_name)
+PROMPT_TEMPLATE = prompt_default + """
 
-key="OPENAI_API_KEY"
-OPENAI_API_KEY=os.getenv(key)
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
+{context}
 
+---
+Answer the question based on the above context: 
+{question}
 
-# Initialize tokenizer
-tokenizer = tiktoken.get_encoding("cl100k_base")
-credentials = service_account.Credentials.from_service_account_info(
-    st.secrets["gcp_service_account"]
-)
-client = storage.Client(credentials=credentials)
+if this is not a question, please ask the user to rephrase it as a question.
+"""
 
 
 def load_files_from_gcs_subdirectory(bucket_name, subdirectory):
-    bucket = client.bucket(bucket_name)
-    blobs = list(bucket.list_blobs(prefix=subdirectory))
-    
-    if not blobs:
-        return []  # or you could raise an exception or return a special value
-    
-    texts = []
-    for blob in blobs:
-        if blob.name.endswith('/'):  # Skip directory markers
-            continue
-        content = blob.download_as_text()
-        texts.append(f"File: {blob.name}\nContent: {content}\n")
-    
-    return texts
+    file_handler = SkyboxPdfHandler()
+    return file_handler.load_files_from_gcs_subdirectory(subdirectory)
 
 def retrieve_with_bm25(chunk_directory,query,top_k):
-
     CHUNK_PATH = chunk_directory
     #load chunks from directory
     corpus = load_files_from_gcs_subdirectory("sb-docs", chunk_directory)
-
+    if len(corpus) == 0:
+        return []
 # Tokenize each document in the corpus
     tokenized_corpus = [word_tokenize(doc.lower()) for doc in corpus] # should store this somewhere for easy retrieval
     bm25 = BM25Okapi(tokenized_corpus)
@@ -81,12 +71,13 @@ def combine_chunks(chunks_bm25, chunks_vector_db, top_k=20):
     return retrieved_chunks
 
 def get_embedding(text):
-    return openai_client.embeddings.create(input = [text], model="text-embedding-3-large").data[0].embedding
+    llm = LangChainChatClient()
+    embedding = llm.create_embedding(text)        
+    return embedding
 
 def get_relevant_chunks(query, top_k=3):
-    query_embedding = get_embedding(query)
-    results = index.query(vector=query_embedding, top_k=top_k, include_metadata=True)
-    from_pincone = [result.metadata["chunk_text"] for result in results.matches]
+    file_handler = SkyboxPdfHandler()    
+    from_pincone = file_handler.get_from_pincone(query, top_k)
     from_bm25 = retrieve_with_bm25("chunks",query,top_k)
 
     combined_both_chunks = combine_chunks(from_bm25, from_pincone)
@@ -101,72 +92,54 @@ def get_relevant_chunks(query, top_k=3):
     return list_of_chunks
 
 
-def generate_response(messages):
-    response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        max_tokens=2000
-    )
+def generate_response(user,system_message):
+    llm = LangChainChatClient(temperature = 0.2)
+    response = llm.batch_chat(user,system_message)
+
+
     response_content = response.choices[0].message.content.strip()
     input_cost = response.usage.prompt_tokens
     output_cost = response.usage.completion_tokens 
     usage = {"prompt_tokens": input_cost, "completion_tokens": output_cost}
     return response_content, usage
 
-st.title("Contextual Chatbot")
 
-# Initialize session state
-if "chat_messages" not in st.session_state:
-    st.session_state.chat_messages = [
-        {"role": "system", "content": "You are a helpful assistant."}
-    ]
+def get_prompt(query_text: str):
+    results = get_relevant_chunks(query_text)
 
-if "context" not in st.session_state:
-    st.session_state.context = ""
+    context_text = "\n\n---\n\n".join(results)
+    prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
+    prompt = prompt_template.format(context=context_text, question=query_text)
+    return prompt
 
-# Display chat messages
-for message in st.session_state.chat_messages[1:]:  # Skip the system message
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
 
-# Chat input
-user_input = st.chat_input("Type your message here...")
-
-if user_input:
-    # Add user message to chat history
-    st.session_state.chat_messages.append({"role": "user", "content": user_input})
-
-    # Retrieve relevant chunks from Pinecone
-    relevant_chunks = get_relevant_chunks(user_input)
+def main():
+    st.subheader("Skybox Knowledge Base", divider="red", anchor=False)
+    for msg in messages.messages:
+        if isinstance(msg, AIMessage):
+            st.chat_message("assistant").write(msg.content)
+        elif isinstance(msg, HumanMessage):
+            st.chat_message("human").write(msg.content)
     
-    # Update context
-    st.session_state.context = "\n".join(relevant_chunks)
+    if prompt := st.chat_input("Enter a prompt here..."):
+        try:
+            with st.spinner("Thinking..."):
+                messages.add_message(HumanMessage(content=prompt))
+                st.chat_message("human").write(prompt)
+                system_message = SystemMessage(content=get_prompt(prompt))
+                model_messages = [system_message] + messages.messages            
+                ai_response = llm.chat_model(model_messages)
 
-    # Prepare messages for OpenAI
-    messages_for_openai = [
-        {"role": "system", "content": "You are a helpful assistant. Use the following context to answer the user's question: " + st.session_state.context},
-        *st.session_state.chat_messages[1:]  # Include all user and assistant messages
-    ]
+            messages.add_message(AIMessage(content=ai_response.content))
+            st.chat_message("assistant").write(ai_response.content)
+        except Exception as e:
+            st.error(e, icon="⛔️")
 
-    # Generate response
-    response, usage = generate_response(messages_for_openai)
+    if st.sidebar.button("Clear Chat History"):
+        messages.clear()
 
-    # Add assistant response to chat history
-    st.session_state.chat_messages.append({"role": "assistant", "content": response})
-
-    # Display assistant response
-    with st.chat_message("assistant"):
-        st.write(response)
-
-    # Display token usage
-    st.info(f"Input tokens: {usage['prompt_tokens']}, Output tokens: {usage['completion_tokens']}")
-
-# Clear chat button
-if st.button("Clear Chat"):
-    st.session_state.conversation = None
-    st.session_state.chat_history = None
-    st.session_state.chat_messages = [{"role": "system", "content": "You are a helpful assistant."}]
-    st.session_state.context = ""
-    st.success("Chat cleared.")
-
-st.sidebar.success("You are currently on the Contextual Chatbot page.")
+    st.sidebar.success("You are currently on the Contextual Chatbot page.")
+         
+check_authentication()
+main()
+st.stop() 

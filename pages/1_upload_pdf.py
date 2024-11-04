@@ -9,6 +9,7 @@ import json
 from openai import OpenAI
 from  pinecone import Pinecone
 import os
+from main import add_usage_entry
 from main import check_authentication
 check_authentication()
 
@@ -65,7 +66,9 @@ def split_text(text):
     return chunks
 
 def get_embedding(text):
-    return openai_client.embeddings.create(input = [text], model="text-embedding-3-large").data[0].embedding
+    response = openai_client.embeddings.create(input = [text], model="text-embedding-3-large")
+    add_usage_entry(response.usage.total_tokens, "get_embedding") 
+    return response.data[0].embedding
 
 def get_add_context_prompt(chunk_text, document_text):
     file_loader = FileSystemLoader('./templates')
@@ -86,6 +89,7 @@ def prompt_gpt(prompt):
         messages=messages,
         temperature=0,
     )
+    add_usage_entry(response.usage.total_tokens, "prompt_gpt") 
     content = response.choices[0].message.content
     return content
 

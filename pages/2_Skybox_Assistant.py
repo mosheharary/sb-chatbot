@@ -8,6 +8,7 @@ from google.cloud import storage
 import nltk
 from nltk.tokenize import word_tokenize
 from rank_bm25 import BM25Okapi
+from main import add_usage_entry
 from main import check_authentication
 check_authentication()
 
@@ -81,7 +82,9 @@ def combine_chunks(chunks_bm25, chunks_vector_db, top_k=20):
     return retrieved_chunks
 
 def get_embedding(text):
-    return openai_client.embeddings.create(input = [text], model="text-embedding-3-large").data[0].embedding
+    response = openai_client.embeddings.create(input = [text], model="text-embedding-3-large")
+    add_usage_entry(response.usage.total_tokens, "get_embedding")
+    return response.data[0].embedding
 
 def get_relevant_chunks(query, top_k=3):
     query_embedding = get_embedding(query)
@@ -107,6 +110,7 @@ def generate_response(messages):
         messages=messages,
         max_tokens=2000
     )
+    add_usage_entry(response.usage.total_tokens, "generate_response")
     response_content = response.choices[0].message.content.strip()
     input_cost = response.usage.prompt_tokens
     output_cost = response.usage.completion_tokens 

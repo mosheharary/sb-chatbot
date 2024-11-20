@@ -26,6 +26,9 @@ sqlitecloud = "^0.0.83"
 langchain-core = "^0.3.18"
 langchain = "^0.3.7"
 langchain-community = "^0.3.7"
+rouge-score = "^0.1.2"
+torch = "2.1.2"
+bert-score = "^0.3.13"
 
 
 [build-system]

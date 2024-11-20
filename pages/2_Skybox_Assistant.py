@@ -1,116 +1,49 @@
 import streamlit as st
 from nltk.tokenize import word_tokenize
-from rank_bm25 import BM25Okapi
-from LangChainChatClient import LangChainChatClient
 from main import check_authentication
-from SkyboxPdfHandler import SkyboxPdfHandler
-from langchain.prompts import ChatPromptTemplate
+from main import get_resources
+
 from langchain_community.chat_message_histories import StreamlitChatMessageHistory
 from langchain.schema import SystemMessage, HumanMessage, AIMessage
-
 
 selected_embedding_models = st.session_state.params["selected_embedding_models"]
 selected_llm_models = st.session_state.params["selected_llm_models"]
 messages = StreamlitChatMessageHistory(key="chat_messages")
 
 st.set_page_config(page_title="Skybox Assistant", page_icon="🤖")
+
+
 st.sidebar.header("Parameters")
 prompt_default = st.sidebar.text_area(
     "Default Prompt", 
-    value="""
-    Act as a conversational assistant.
-    Answer the question based only on the following context:
+    value="""You are an expert assistant tasked with answering questions based on provided documents. Follow these guidelines for each response:
+1. **Primary Source Check**: Always look for answers in the provided documents first. Use the content of these documents as your primary source, and include relevant information from them in your response. If there are multiple documents, combine the information thoughtfully and concisely.
+2. **External Knowledge (Secondary Source)**: If the answer isn’t fully covered in the provided documents, use other information you have access to in order to complete the response. Make it clear when additional information is being included.
+3. **Detailed and Structured Responses**: Provide answers in a detailed and organized manner. Use numbered steps to guide the reader through your response logically, highlighting key points and important details. If the question is in the form of multiple choice questions and there are several options to answer , please response only the text of the answer chosen and nothing else .
+4. **Clarity and Completeness**: Ensure each response is clear and complete. Avoid unnecessary details but make sure to cover the main aspects of the question thoroughly.
+5. **Reference**: Whenever possible, indicate which part of the provided documents your answer is drawn from, using quotes or summaries as needed.
+Use this structure to create responses that are thorough, organized, and insightful.
+
     """,height=150)
-temperature = st.sidebar.slider("Temperature", min_value=0.0, max_value=1.0, value=0.5, step=0.1)
+temperature = st.sidebar.slider("Temperature", min_value=0.0, max_value=1.0, value=0.1, step=0.1)
+top_k = st.sidebar.slider("Top K", min_value=1, max_value=10, value=3, step=1)
 
-llm = LangChainChatClient(temperature=temperature)
+llm_models = [
+            "gpt-4o-mini",
+            "gpt-4o",
+            "o1-preview"
+]
 
+selected_llm_models = st.selectbox(
+    "Select OpenAI  Model:",
+    options=llm_models,
+    index=0,  # Default selection
+    help="Choose an OpenAI LLM model from the list. This parameter will take effect when you ask a question."
+)
 
-PROMPT_TEMPLATE = prompt_default + """
-
-{context}
-
----
-Answer the question based on the above context: 
-{question}
-
-if this is not a question, please ask the user to rephrase it as a question.
-"""
-
-
-def load_files_from_gcs_subdirectory(bucket_name, subdirectory):
-    file_handler = SkyboxPdfHandler()
-    return file_handler.load_files_from_gcs_subdirectory(subdirectory)
-
-def retrieve_with_bm25(chunk_directory,query,top_k):
-    CHUNK_PATH = chunk_directory
-    #load chunks from directory
-    corpus = load_files_from_gcs_subdirectory("sb-docs", chunk_directory)
-    if len(corpus) == 0:
-        return []
-# Tokenize each document in the corpus
-    tokenized_corpus = [word_tokenize(doc.lower()) for doc in corpus] # should store this somewhere for easy retrieval
-    bm25 = BM25Okapi(tokenized_corpus)
-    tokenized_query = word_tokenize(query.lower())
-    #use the bm25 to query the chunks
-    doc_scores = bm25.get_top_n(tokenized_query, corpus, n=top_k)
-    return doc_scores
-
-def combine_chunks(chunks_bm25, chunks_vector_db, top_k=20):
-    """given output from bm25 and vector database, combine them to only include unique chunks"""
-    retrieved_chunks = []
-    for chunk1, chunk2 in zip(chunks_bm25, chunks_vector_db):
-        if chunk1 not in retrieved_chunks:
-            retrieved_chunks.append(chunk1)
-            if len(retrieved_chunks) >= top_k:
-                break
-        if chunk2 not in retrieved_chunks:
-            retrieved_chunks.append(chunk2)
-            if len(retrieved_chunks) >= top_k:
-                break
-    return retrieved_chunks
-
-def get_embedding(text):
-    llm = LangChainChatClient()
-    embedding = llm.create_embedding(text)        
-    return embedding
-
-def get_relevant_chunks(query, top_k=3):
-    file_handler = SkyboxPdfHandler()    
-    from_pincone = file_handler.get_from_pincone(query, top_k)
-    from_bm25 = retrieve_with_bm25("chunks",query,top_k)
-
-    combined_both_chunks = combine_chunks(from_bm25, from_pincone)
-
-    list_of_chunks = []
-        #since chunks are stored in diff way , we move it to one list of texts
-    for chunk in combined_both_chunks:
-        if isinstance(chunk, dict):
-            list_of_chunks.append(chunk["chunk_text"])
-        else:
-            list_of_chunks.append(chunk)
-    return list_of_chunks
-
-
-def generate_response(user,system_message):
-    llm = LangChainChatClient(temperature = 0.2)
-    response = llm.batch_chat(user,system_message)
-
-
-    response_content = response.choices[0].message.content.strip()
-    input_cost = response.usage.prompt_tokens
-    output_cost = response.usage.completion_tokens 
-    usage = {"prompt_tokens": input_cost, "completion_tokens": output_cost}
-    return response_content, usage
-
-
-def get_prompt(query_text: str):
-    results = get_relevant_chunks(query_text)
-
-    context_text = "\n\n---\n\n".join(results)
-    prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
-    prompt = prompt_template.format(context=context_text, question=query_text)
-    return prompt
+rag = get_resources()['rag']
+rag.update_parameters(prompt_default, temperature, top_k)
+rag.update_llm_model(selected_llm_models)
 
 
 def main():
@@ -126,9 +59,9 @@ def main():
             with st.spinner("Thinking..."):
                 messages.add_message(HumanMessage(content=prompt))
                 st.chat_message("human").write(prompt)
-                system_message = SystemMessage(content=get_prompt(prompt))
-                model_messages = [system_message] + messages.messages            
-                ai_response = llm.chat_model(model_messages)
+                system_message = SystemMessage(content=rag.get_prompt(prompt))
+                model_messages = [system_message] + messages.messages         
+                ai_response = rag.chat_model(model_messages)   
 
             messages.add_message(AIMessage(content=ai_response.content))
             st.chat_message("assistant").write(ai_response.content)

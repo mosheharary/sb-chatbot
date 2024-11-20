@@ -23,21 +23,19 @@ class LangChainChatClient:
         sqlient.insert_data(sqlite_data,"api_usage_data")
 
     def __init__(self,temperature=0):
-        api_key = st.secrets['OPENAI_API_KEY']
-        model = st.session_state.params["selected_llm_models"]
-        embedding_model = st.session_state.params['selected_embedding_models']
+        self.api_key = st.secrets['OPENAI_API_KEY']
+        self.model = st.session_state["selected_llm_models"]
+        self.embedding_model = st.session_state['selected_embedding_models']
+        self.temperature = temperature
         self.llm = ChatOpenAI(
-            openai_api_key=api_key,
-            model=model,
-            temperature=temperature
+            openai_api_key=self.api_key,
+            model=self.model,
+            temperature=self.temperature
         )
         self.embeddings = OpenAIEmbeddings(
-            openai_api_key=api_key,
-            model=embedding_model
+            openai_api_key=self.api_key,
+            model=self.embedding_model
         )
-        self.temperature = temperature
-        self.model = model
-        self.embedding_model = embedding_model
 
     def chat(self, user_input, system_message=None):
         messages = []
@@ -96,3 +94,11 @@ class LangChainChatClient:
             return response
         except Exception as e:
             return f"Error: {e}"
+        
+    def update_model(self,model):
+        self.model = model
+        self.llm = ChatOpenAI(
+            openai_api_key=self.api_key,
+            model=self.model,
+            temperature=self.temperature
+        )

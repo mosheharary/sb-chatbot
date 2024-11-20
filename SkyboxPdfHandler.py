@@ -5,33 +5,14 @@ import tiktoken
 import json
 from jinja2 import Environment, FileSystemLoader
 from LangChainChatClient import LangChainChatClient
-from google.oauth2 import service_account
-from google.cloud import storage
-from  pinecone import Pinecone
-
-
-
-
+from VectorDatabaseClient import VectorDatabaseClient
 
 
 class SkyboxPdfHandler:
 
     def load_files_from_gcs_subdirectory(self, subdirectory):
-        bucket = self.gcp_client.bucket(self.bucket_name)
-        blobs = list(bucket.list_blobs(prefix=subdirectory))
+        return self.gcp_client.get_subdirectory_blobs(subdirectory)
         
-        if not blobs:
-            return []  # or you could raise an exception or return a special value
-        
-        texts = []
-        for blob in blobs:
-            if blob.name.endswith('/'):  # Skip directory markers
-                continue
-            content = blob.download_as_text()
-            texts.append(f"File: {blob.name}\nContent: {content}\n")
-        
-        return texts
-
     def get_embedding(self, text):
         llm = LangChainChatClient()
         embedding = llm.create_embedding(text)        
@@ -77,6 +58,7 @@ class SkyboxPdfHandler:
         self.json_files.append(tuple([json_blob_name,json_file]))
 
         self.json_objects.append(json_object)
+        self.gcp_client.add_chunk(chunk_with_context)
 
 
     def split_text(self):
@@ -97,7 +79,7 @@ class SkyboxPdfHandler:
         self.text = text
         self.text_file = io.BytesIO(text.encode('utf-8'))
 
-    def __init__(self, uploaded_file=None):
+    def __init__(self, gcp_client, uploaded_file=None):
         if uploaded_file:
             self.uploaded_file = uploaded_file
             self.name = uploaded_file.name
@@ -107,20 +89,15 @@ class SkyboxPdfHandler:
             self.embeddings_base_name = f"embeddings/{uploaded_file.name.rsplit('.', 1)[0]}"
 
         self.bucket_name = "sb-docs"
-        self.chunk_size = st.session_state.params["chunk_size"]
-        self.chunk_overlap = st.session_state.params["chunk_overlap"]
-        self.selected_embedding_models = st.session_state.params["selected_embedding_models"]
-        self.selected_llm_models = st.session_state.params["selected_llm_models"]
+        self.chunk_size = st.session_state["chunk_size"]
+        self.chunk_overlap = st.session_state["chunk_overlap"]
+        self.selected_embedding_models = st.session_state["selected_embedding_models"]
+        self.selected_llm_models = st.session_state["selected_llm_models"]
         self.json_files = []    
         self.text_files = []
         self.json_objects = []
-        credentials = service_account.Credentials.from_service_account_info(
-            st.secrets["gcp_service_account"]
-        )
-        self.gcp_client = storage.Client(credentials=credentials)
-        pinecone = Pinecone(api_key=st.secrets['PINECONE_API_KEY'])
-        index_name = "skybox-docs"
-        self.index = pinecone.Index(index_name)
+        self.gcp_client = gcp_client
+        self.index = VectorDatabaseClient()
 
 
 
@@ -129,24 +106,22 @@ class SkyboxPdfHandler:
         for i, chunk in enumerate(self.chunks):        
             self.create_embedding(chunk, i)
 
-    def upload_to_gcs(self, file, bucket_name, destination_blob_name):
-        bucket = self.gcp_client.bucket(bucket_name)
-        blob = bucket.blob(destination_blob_name)
-        blob.upload_from_file(file)
+    def upload_to_gcs(self, file, destination_blob_name):
+        self.gcp_client.upload_from_file(file,destination_blob_name)
 
     def save(self):
-        self.upload_to_gcs(self.text_file, self.bucket_name, self.txt_blob_name)
+        self.upload_to_gcs(self.text_file, self.txt_blob_name)
         self.uploaded_file.seek(0)
-        self.upload_to_gcs(self.uploaded_file, self.bucket_name, self.pdf_blob_name)
+        self.upload_to_gcs(self.uploaded_file, self.pdf_blob_name)
         for i, json_file in enumerate(self.json_files):
             json_blob_name = json_file[0]
             file = json_file[1]
-            self.upload_to_gcs(file, self.bucket_name, json_blob_name)
+            self.upload_to_gcs(file, json_blob_name)
 
         for i, text_file in enumerate(self.text_files):
             text_blob_name = text_file[0]
             file = text_file[1]
-            self.upload_to_gcs(file, self.bucket_name, text_blob_name)
+            self.upload_to_gcs(file, text_blob_name)
         
         for json_object in self.json_objects:
             self.upload_to_pinecone(json_object)
@@ -174,8 +149,11 @@ class SkyboxPdfHandler:
 
     def get_from_pincone(self,query,top_k=3):
         query_embedding = self.get_embedding(query)
-        results = self.index.query(vector=query_embedding, top_k=top_k, include_metadata=True)
-        from_pincone = [result.metadata["chunk_text"] for result in results.matches]        
+        try:
+            results = self.index.query(query_embedding, top_k)
+            from_pincone = [result.metadata["chunk_text"] for result in results.matches]        
+        except Exception as e:
+            st.error(f"Error: {e}")            
         return from_pincone
         
 

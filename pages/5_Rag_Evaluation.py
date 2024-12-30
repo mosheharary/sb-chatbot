@@ -16,6 +16,7 @@ prompt_default = st.sidebar.text_area(
 4. **Clarity and Completeness**: Ensure each response is clear and complete. Avoid unnecessary details but make sure to cover the main aspects of the question thoroughly.
 5. **Reference**: Whenever possible, indicate which part of the provided documents your answer is drawn from, using quotes or summaries as needed.
 Use this structure to create responses that are thorough, organized, and insightful.
+6. **If the questions is in the form of multiple choice question , just return the answer , nothing more and nothing less
 
     """,height=150)
 temperature = st.sidebar.slider("Temperature", min_value=0.0, max_value=1.0, value=0.1, step=0.1)

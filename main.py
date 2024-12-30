@@ -79,7 +79,7 @@ def main():
                 "Chunk Size (1000 to 7000):",
                 min_value=1000,
                 max_value=7000,
-                value=1000,  # Default value
+                value=6000,  # Default value
                 step=100,
                 help="Enter a chunk size between 500 and 7000. This parameter will take effect when you upload a PDF file."
             )
@@ -90,7 +90,7 @@ def main():
                 "Chunk Overlap (100 to 500):",
                 min_value=100,
                 max_value=500,
-                value=200,  # Default value
+                value=500,  # Default value
                 step=50,
                 help="Enter a chunk overlap between 100 and 1000. This parameter will take effect when you upload a PDF file."
             )

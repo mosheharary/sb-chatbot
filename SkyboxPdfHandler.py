@@ -6,6 +6,8 @@ import json
 from jinja2 import Environment, FileSystemLoader
 from LangChainChatClient import LangChainChatClient
 from VectorDatabaseClient import VectorDatabaseClient
+from tika import parser
+
 
 
 class SkyboxPdfHandler:
@@ -72,12 +74,17 @@ class SkyboxPdfHandler:
         self.chunks=chunks
 
     def pdf_to_text(self):
-        pdf_reader = PyPDF2.PdfReader(self.uploaded_file)
-        text = ""
-        for page in pdf_reader.pages:
-            text += page.extract_text()
-        self.text = text
-        self.text_file = io.BytesIO(text.encode('utf-8'))
+        if st.secrets["use_tika"] == "true":
+            parsed_pdf = parser.from_file(self.uploaded_file)
+            self.text = parsed_pdf['content']
+            self.text_file = io.BytesIO(self.text.encode('utf-8'))
+        else:
+            pdf_reader = PyPDF2.PdfReader(self.uploaded_file)
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text()
+            self.text = text
+            self.text_file = io.BytesIO(text.encode('utf-8'))
 
     def __init__(self, gcp_client, uploaded_file=None):
         if uploaded_file:
@@ -111,8 +118,12 @@ class SkyboxPdfHandler:
 
     def save(self):
         self.upload_to_gcs(self.text_file, self.txt_blob_name)
-        self.uploaded_file.seek(0)
-        self.upload_to_gcs(self.uploaded_file, self.pdf_blob_name)
+        if st.secrets["use_tika"] == "true":
+            pass
+        else:
+            self.uploaded_file.seek(0)
+            self.upload_to_gcs(self.uploaded_file, self.pdf_blob_name)
+        
         for i, json_file in enumerate(self.json_files):
             json_blob_name = json_file[0]
             file = json_file[1]

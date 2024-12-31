@@ -25,7 +25,8 @@ class RAGEvaluator:
         Get response from the RAG pipeline using LangChain and OpenAI
         """
         message = HumanMessage(content=question)
-        system_message = SystemMessage(content=self.rag.get_prompt(question))
+        sys_message_content , picked_chunks = self.rag.get_prompt(question)
+        system_message = SystemMessage(content=sys_message_content)
         model_messages = [system_message] + [message]
         response = self.rag.chat_model(model_messages)
         return response

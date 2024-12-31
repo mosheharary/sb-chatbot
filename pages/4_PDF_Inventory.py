@@ -18,11 +18,15 @@ def display_pdf(file_path):
     with tempfile.NamedTemporaryFile(delete=False) as temp_file:
         blob.download_to_filename(temp_file.name)
         with open(temp_file.name, 'rb') as file:
-            pdf_reader = PdfReader(file)
-            for page_num in range(len(pdf_reader.pages)):
-                page = pdf_reader.pages[page_num]
-                st.write(f"Page {page_num + 1}")
-                st.write(page.extract_text())
+            if st.secrets["use_tika"] == "true":
+                file_content = file.read().decode('utf-8') 
+                st.write(file_content)
+            else:
+                pdf_reader = PdfReader(file)
+                for page_num in range(len(pdf_reader.pages)):
+                    page = pdf_reader.pages[page_num]
+                    st.write(f"Page {page_num + 1}")
+                    st.write(page.extract_text())
 
 
 def main():    
@@ -30,7 +34,7 @@ def main():
     st.title("Inventory")
     
     # Replace with your bucket name and subdirectory
-    subdirectory = "pdfs/"
+    subdirectory = "texts/"
     
     files = client.list_files_in_bucket(subdirectory)
     selected_file = st.selectbox("Select a file", files)

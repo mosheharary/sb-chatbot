@@ -46,6 +46,9 @@ rag = get_resources()['rag']
 rag.update_parameters(prompt_default, temperature, top_k)
 rag.update_llm_model(selected_llm_models)
 
+def format_chunk(chunk):
+    # Split the chunk into lines and join with newlines to preserve formatting
+    return chunk.strip().split('\n')
 
 def main():
     st.subheader("Skybox Knowledge Base", divider="red", anchor=False)
@@ -60,7 +63,9 @@ def main():
             with st.spinner("Thinking..."):
                 messages.add_message(HumanMessage(content=prompt))
                 st.chat_message("human").write(prompt)
-                system_message = SystemMessage(content=rag.get_prompt(prompt))
+                sys_message_content , picked_chunks = rag.get_prompt(prompt)
+                st.session_state.current_chunks = picked_chunks
+                system_message = SystemMessage(content=sys_message_content)
                 model_messages = [system_message] + messages.messages         
                 ai_response = rag.chat_model(model_messages)   
 
@@ -68,6 +73,20 @@ def main():
             st.chat_message("assistant").write(ai_response.content)
         except Exception as e:
             st.error(e, icon="⛔️")
+    
+    st.divider()
+
+    with st.expander("View Reference Chunks", expanded=False):
+        if "current_chunks" not in st.session_state:
+            st.session_state['current_chunks'] = []
+        if st.session_state.current_chunks:
+            for i, chunk in enumerate(st.session_state.current_chunks):
+                # Format the chunk text to preserve formatting
+                formatted_lines = format_chunk(chunk)
+                st.text_area(f"Chunk {i+1}", value='\n'.join(formatted_lines), height=150)
+        else:
+            st.info("No reference chunks available. Ask a question to see relevant document chunks.")
+
 
     if st.sidebar.button("Clear Chat History"):
         messages.clear()

@@ -93,7 +93,7 @@ if this is not a question, please ask the user to rephrase it as a question.
         results = self.get_relevant_chunks(query_text, top_k=self.top_k)
         context_text = "\n\n---\n\n".join(results)
         prompt = self.prompt_template.format(context=context_text, question=query_text)
-        return prompt
+        return prompt , results
     
     def chat_model(self,model_messages):
         response = self.llm.chat_model(model_messages)
